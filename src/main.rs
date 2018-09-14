@@ -21,7 +21,7 @@ fn main() {
         .as_raw_fd();
     // We create two pipes
     let (pipe0_rd, pipe0_wr) = pipe().unwrap();
-    // let (pipe1_rd, pipe1_wr) = pipe().unwrap();
+    let (pipe1_rd, pipe1_wr) = pipe().unwrap();
 
     let stdin = stdin();
     let _handle0 = stdin.lock();
@@ -44,7 +44,8 @@ fn main() {
             break;
         }
         // Make sure pipe0 and pipe1 have the same data
-        let n = tee(pipe0_rd,
+        let n = tee(
+            pipe0_rd,
             pipe1_wr,
             bytes_copied,
             SpliceFFlags::empty()
