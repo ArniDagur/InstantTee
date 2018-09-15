@@ -3,7 +3,7 @@ extern crate nix;
 extern crate log;
 
 use std::env;
-use std::fs::File;
+use std::fs::OpenOptions;
 use std::io::{stdin, stdout, stderr};
 use std::os::unix::io::{AsRawFd, RawFd};
 
@@ -14,11 +14,7 @@ use std::process;
 
 const BUF_SIZE: usize = 1024 * 16;
 
-fn main() {
-    let args: Vec<String> = env::args().skip(1).collect();
-    let file_fd = File::open(&args[0])
-        .expect("No such path exists")
-        .as_raw_fd();
+fn instanttee<T: AsRawFd>(output: &T) {
     // We create two pipes
     let (pipe0_rd, pipe0_wr) = pipe().unwrap();
     let (pipe1_rd, pipe1_wr) = pipe().unwrap();
@@ -49,8 +45,8 @@ fn main() {
             pipe1_wr,
             bytes_copied,
             SpliceFFlags::empty()
-        ).unwrap_or_else(|_| {
-            println!("Error at tee");
+        ).unwrap_or_else(|err| {
+            println!("Error at tee: {}", err);
             process::exit(1);
         });
         // Copy to standard output
@@ -59,24 +55,34 @@ fn main() {
             None,
             stdout.as_raw_fd(),
             None,
-            // What should I put here? n or BUF_SIZE?
             BUF_SIZE,
             SpliceFFlags::empty(),
         ).unwrap_or_else(|err| {
-            println!("Error at splice1 {}", err);
+            println!("Error at splice1: {}", err);
             process::exit(1);
         });
         // Copy to file
         splice(
             pipe1_rd,
             None,
-            file_fd,
+            output.as_raw_fd(),
             None,
             BUF_SIZE,
             SpliceFFlags::empty(),
-        ).unwrap_or_else(|_| {
-            println!("Error at splice2");
+        ).unwrap_or_else(|err| {
+            println!("Error at splice2: {}", err);
             process::exit(1);
         });
     }
+}
+
+fn main() {
+    let args: Vec<String> = env::args().skip(1).collect();
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(&args[0])
+        .unwrap();
+    instanttee(&file);
 }
