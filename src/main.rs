@@ -1,88 +1,142 @@
 extern crate nix;
-#[macro_use]
-extern crate log;
 
 use std::env;
-use std::fs::OpenOptions;
-use std::io::{stdin, stdout, stderr};
+use std::fs::{File, OpenOptions};
+use std::io::{stdin, stdout, stderr, Write};
 use std::os::unix::io::{AsRawFd, RawFd};
+use std::process;
+use std::convert;
 
 use nix::fcntl::{tee, splice, SpliceFFlags};
 use nix::unistd::pipe;
 
-use std::process;
-
 const BUF_SIZE: usize = 1024 * 16;
+const HELP: &'static str = r#"InstantTee ~ tee but a little faster
+Copy standard input to each FILE, and also to standard output.
 
-fn instanttee<T: AsRawFd>(output: &T) {
+Options:
+    -h, --help | Display this help message
+
+Contact:
+    Árni Dagur <arnidg@protonmail.ch>
+    https://github.com/ArniDagur/InstantTee
+"#;
+
+struct FilePipePair {
+    file: File,
+    pipe_rd: RawFd,
+    pipe_wr: RawFd
+}
+impl convert::From<File> for FilePipePair {
+    fn from(file: File) -> Self {
+        let (pipe_rd, pipe_wr) = pipe().unwrap();
+        FilePipePair {
+            file,
+            pipe_rd,
+            pipe_wr
+        }
+    }
+}
+
+fn instanttee(files: Vec<String>) {
     // We create two pipes
-    let (pipe0_rd, pipe0_wr) = pipe().unwrap();
-    let (pipe1_rd, pipe1_wr) = pipe().unwrap();
+    let (main_pipe_rd, main_pipe_wr) = pipe().unwrap();
+
+    let mut fpps = Vec::new();
+    for file in files {
+        fpps.push(FilePipePair::from(
+            OpenOptions::new()
+            .write(true)
+            .read(true)
+            .create(true)
+            .open(file)
+            .unwrap()
+        ));
+    }
 
     let stdin = stdin();
     let _handle0 = stdin.lock();
     let stdout = stdout();
     let _handle1 = stdout.lock();
+    let stderr = stderr();
+    let mut stderr = stderr.lock();
 
     loop {
-        // stdin -> pipe
+        // Copy stdin to main pipe
         let bytes_copied = splice(
             stdin.as_raw_fd(),
             None,
-            pipe0_wr,
+            main_pipe_wr,
             None,
             BUF_SIZE,
             SpliceFFlags::empty(),
-        ).unwrap();
+        ).unwrap_or_else(|err| {
+            write!(stderr,
+                "Error when attempting to splice stdin to pipe:\n{}", err
+            ).unwrap();
+            stderr.flush().unwrap();
+            process::exit(1);
+        });
         if bytes_copied == 0 {
             // We read 0 bytes from the input,
             // which means we're done copying.
             break;
         }
-        // Make sure pipe0 and pipe1 have the same data
-        let n = tee(
-            pipe0_rd,
-            pipe1_wr,
-            bytes_copied,
-            SpliceFFlags::empty()
-        ).unwrap_or_else(|err| {
-            println!("Error at tee: {}", err);
-            process::exit(1);
-        });
-        // Copy to standard output
+        // Copy stdin from main pipe to FilePipePair pipes
+        for fpp in &fpps {
+            tee(
+                main_pipe_rd,
+                fpp.pipe_wr,
+                bytes_copied,
+                SpliceFFlags::empty()
+            ).unwrap_or_else(|err| {
+                write!(stderr,
+                    "Error when attempting to tee stdin to pipe:\n{}", err
+                ).unwrap();
+                stderr.flush().unwrap();
+                process::exit(1);
+            });
+        }
+        // Copy stdin from main pipe to stdout
         splice(
-            pipe0_rd,
+            main_pipe_rd,
             None,
             stdout.as_raw_fd(),
             None,
             BUF_SIZE,
             SpliceFFlags::empty(),
         ).unwrap_or_else(|err| {
-            println!("Error at splice1: {}", err);
+            write!(stderr,
+                "Error when attempting to splice stdin to stdout:\n{}", err
+            ).unwrap();
+            stderr.flush().unwrap();
             process::exit(1);
         });
-        // Copy to file
-        splice(
-            pipe1_rd,
-            None,
-            output.as_raw_fd(),
-            None,
-            BUF_SIZE,
-            SpliceFFlags::empty(),
-        ).unwrap_or_else(|err| {
-            println!("Error at splice2: {}", err);
-            process::exit(1);
-        });
+        // Copy from the FilePipePair pipes to FilePipePair files
+        for fpp in &fpps {
+            splice(
+                fpp.pipe_rd,
+                None,
+                fpp.file.as_raw_fd(),
+                None,
+                BUF_SIZE,
+                SpliceFFlags::empty(),
+            ).unwrap_or_else(|err| {
+                write!(stderr,
+                    "Error when attempting to splice to file:\n{}", err
+                ).unwrap();
+                stderr.flush().unwrap();
+                process::exit(1);
+            });
+        }
     }
 }
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
-    let mut file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .open(&args[0])
-        .unwrap();
-    instanttee(&file);
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!("{}", HELP);
+        process::exit(0);
+    }
+    instanttee(args);
 }
