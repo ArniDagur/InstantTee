@@ -1,7 +1,10 @@
 [package]
 name = "instanttee"
+description = "Rust implementation of the tee command using splice() and tee() Linux system calls"
 version = "0.1.0"
 authors = ["Árni Dagur <arnidg@protonmail.ch>"]
+repository = "https://github.com/ArniDagur/InstantTee"
+license = "MIT"
 
 [dependencies]
 nix = "0.9.0"
