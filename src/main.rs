@@ -1,4 +1,5 @@
 extern crate nix;
+extern crate getopts;
 
 use std::env;
 use std::fs::{File, OpenOptions};
@@ -9,18 +10,9 @@ use std::convert;
 
 use nix::fcntl::{tee, splice, SpliceFFlags};
 use nix::unistd::pipe;
+use getopts::Options;
 
 const BUF_SIZE: usize = 1024 * 16;
-const HELP: &'static str = r#"InstantTee ~ tee but a little faster
-Copy standard input to each FILE, and also to standard output.
-
-Options:
-    -h, --help | Display this help message
-
-Contact:
-    Árni Dagur <arnidg@protonmail.ch>
-    https://github.com/ArniDagur/InstantTee
-"#;
 
 struct FilePipePair {
     file: File,
@@ -49,8 +41,11 @@ fn instanttee(files: Vec<String>) {
             .write(true)
             .read(true)
             .create(true)
-            .open(file)
-            .unwrap()
+            .open(&file)
+            .unwrap_or_else(|_| {
+                eprintln!("Error when attempting to create file '{}'", file);
+                process::exit(1);
+            })
         ));
     }
 
@@ -132,11 +127,34 @@ fn instanttee(files: Vec<String>) {
     }
 }
 
+fn print_help(called_program: &str, opts: Options) {
+    let brief = format!(
+r#"Usage: {} [OPTION]... [FILE]...
+Copy standard input to each FILE, and also to standard output."#,
+        called_program
+    );
+    print!("{}", opts.usage(&brief));
+    process::exit(0);
+}
+
 fn main() {
-    let args: Vec<String> = env::args().skip(1).collect();
-    if args.iter().any(|a| a == "--help" || a == "-h") {
-        println!("{}", HELP);
-        process::exit(0);
+    // Argument handling
+    let args: Vec<String> = env::args().collect();
+    let called_program = args[0].clone();
+
+    let mut opts = Options::new();
+    opts.optflag("h", "help", "display this help message");
+
+    let matches = match opts.parse(args) {
+        Ok(matches) => matches,
+        Err(failure) => {
+            eprintln!("{}", failure.to_string());
+            process::exit(1);
+        }
+    };
+    if matches.opt_present("h") {
+        print_help(&called_program, opts);
     }
-    instanttee(args);
+
+    instanttee(matches.free[1..].to_vec());
 }
