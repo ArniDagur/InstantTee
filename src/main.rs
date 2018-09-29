@@ -3,7 +3,7 @@ extern crate getopts;
 
 use std::env;
 use std::fs::{File, OpenOptions};
-use std::io::{stdin, stdout, stderr, Write};
+use std::io::{stdin, stdout};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::process;
 use std::convert;
@@ -53,8 +53,6 @@ fn instanttee(files: Vec<String>, append: bool) {
     let _handle0 = stdin.lock();
     let stdout = stdout();
     let _handle1 = stdout.lock();
-    let stderr = stderr();
-    let mut stderr = stderr.lock();
 
     loop {
         // Copy stdin to main pipe
@@ -66,10 +64,7 @@ fn instanttee(files: Vec<String>, append: bool) {
             BUF_SIZE,
             SpliceFFlags::empty(),
         ).unwrap_or_else(|err| {
-            write!(stderr,
-                "Error when attempting to splice stdin to pipe:\n{}", err
-            ).unwrap();
-            stderr.flush().unwrap();
+            eprintln!("Error when attempting to splice stdin to pipe: {}", err);
             process::exit(1);
         });
         if bytes_copied == 0 {
@@ -85,10 +80,7 @@ fn instanttee(files: Vec<String>, append: bool) {
                 bytes_copied,
                 SpliceFFlags::empty()
             ).unwrap_or_else(|err| {
-                write!(stderr,
-                    "Error when attempting to tee stdin to pipe:\n{}", err
-                ).unwrap();
-                stderr.flush().unwrap();
+                eprintln!("Error when attempting to tee stdin to pipe: {}", err);
                 process::exit(1);
             });
         }
@@ -101,10 +93,7 @@ fn instanttee(files: Vec<String>, append: bool) {
             BUF_SIZE,
             SpliceFFlags::empty(),
         ).unwrap_or_else(|err| {
-            write!(stderr,
-                "Error when attempting to splice stdin to stdout:\n{}", err
-            ).unwrap();
-            stderr.flush().unwrap();
+            eprintln!("Error when attempting to splice stdin to stdout: {}", err);
             process::exit(1);
         });
         // Copy from the FilePipePair pipes to FilePipePair files
@@ -124,10 +113,7 @@ fn instanttee(files: Vec<String>, append: bool) {
                 BUF_SIZE,
                 SpliceFFlags::empty(),
             ).unwrap_or_else(|err| {
-                write!(stderr,
-                    "Error when attempting to splice to file:\n{}", err
-                ).unwrap();
-                stderr.flush().unwrap();
+                eprintln!("Error when attempting to splice to file: {}", err);
                 process::exit(1);
             });
         }
