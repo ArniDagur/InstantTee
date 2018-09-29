@@ -30,7 +30,7 @@ impl convert::From<File> for FilePipePair {
     }
 }
 
-fn instanttee(files: Vec<String>) {
+fn instanttee(files: Vec<String>, append: bool) {
     // We create two pipes
     let (main_pipe_rd, main_pipe_wr) = pipe().unwrap();
 
@@ -109,11 +109,18 @@ fn instanttee(files: Vec<String>) {
         });
         // Copy from the FilePipePair pipes to FilePipePair files
         for fpp in &fpps {
+            // TODO: There is certainly a better way to do this where the offset
+            // does not have to be found in a loop.
+            let mut offset = if append {
+                fpp.file.metadata().unwrap().len() as i64
+            } else  {
+                0
+            };
             splice(
                 fpp.pipe_rd,
                 None,
                 fpp.file.as_raw_fd(),
-                None,
+                Some(&mut offset),
                 BUF_SIZE,
                 SpliceFFlags::empty(),
             ).unwrap_or_else(|err| {
@@ -144,6 +151,7 @@ fn main() {
 
     let mut opts = Options::new();
     opts.optflag("h", "help", "display this help message");
+    opts.optflag("a", "append", "append to the given FILES, do not overwrite");
 
     let matches = match opts.parse(args) {
         Ok(matches) => matches,
@@ -156,5 +164,5 @@ fn main() {
         print_help(&called_program, opts);
     }
 
-    instanttee(matches.free[1..].to_vec());
+    instanttee(matches.free[1..].to_vec(), matches.opt_present("a"));
 }
