@@ -15,6 +15,7 @@ use getopts::Options;
 const BUF_SIZE: usize = 1024 * 16;
 
 struct FilePipePair {
+    offset: i64,
     file: File,
     pipe_rd: RawFd,
     pipe_wr: RawFd
@@ -23,6 +24,7 @@ impl convert::From<File> for FilePipePair {
     fn from(file: File) -> Self {
         let (pipe_rd, pipe_wr) = pipe().unwrap();
         FilePipePair {
+            offset: file.metadata().unwrap().len() as i64,
             file,
             pipe_rd,
             pipe_wr
@@ -41,6 +43,8 @@ fn instanttee(files: Vec<String>, append: bool) {
             .write(true)
             .read(true)
             .create(true)
+            // Truncate file to 0 bytes if it exists and `append` is not true
+            .truncate(!append)
             .open(&file)
             .unwrap_or_else(|_| {
                 eprintln!("Error when attempting to create file '{}'", file);
@@ -97,19 +101,12 @@ fn instanttee(files: Vec<String>, append: bool) {
             process::exit(1);
         });
         // Copy from the FilePipePair pipes to FilePipePair files
-        for fpp in &fpps {
-            // TODO: There is certainly a better way to do this where the offset
-            // does not have to be found in a loop.
-            let mut offset = if append {
-                fpp.file.metadata().unwrap().len() as i64
-            } else  {
-                0
-            };
+        for fpp in &mut fpps {
             splice(
                 fpp.pipe_rd,
                 None,
                 fpp.file.as_raw_fd(),
-                Some(&mut offset),
+                Some(&mut fpp.offset),
                 BUF_SIZE,
                 SpliceFFlags::empty(),
             ).unwrap_or_else(|err| {
