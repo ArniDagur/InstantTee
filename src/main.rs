@@ -12,7 +12,7 @@ use nix::fcntl::{tee, splice, SpliceFFlags};
 use nix::unistd::pipe;
 use getopts::Options;
 
-const BUF_SIZE: usize = 1024 * 16;
+const BUF_SIZE: usize = 1024 * 64;
 
 struct FilePipePair {
     offset: i64,

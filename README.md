@@ -6,13 +6,13 @@
 
 ```bash
 $ fcat /tmp/largefile | itee | pv -r > /dev/zero
-[11.5GiB/s]
-$ fcat /tmp/largefile | tee | pv -r > /dev/zero
-[2.54GiB/s]
+[11.6GiB/s]
 $ fcat /tmp/largefile | itee /dev/zero | pv -r > /dev/zero
-[5.31GiB/s]
+[14.3GiB/s]
+$ fcat /tmp/largefile | tee | pv -r > /dev/zero
+[2.90GiB/s]
 $ fcat /tmp/largefile | tee /dev/zero | pv -r > /dev/zero
-[2.34GiB/s]
+[2.66GiB/s]
 ```
 
 <h2>License</h2>
