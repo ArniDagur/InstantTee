@@ -23,7 +23,7 @@ use hurdles::Barrier;
 use std::thread;
 // use std::sync::{Arc, Barrier};
 use std::sync::Arc;
-use std::sync::atomic::{Ordering, AtomicUsize};
+// use std::sync::atomic::{Ordering, AtomicUsize};
 
 
 const BUF_SIZE: usize = 1024 * 64;
@@ -58,9 +58,11 @@ impl FilePipePair {
             process::exit(1);
         });
         if bytes_teed == 0 {
+            // If we only tee 0 bytes, we're bound to only splice 0 bytes too.
+            // This check also helps because splice() will block if we attempt
+            // to splice 0 bytes, as self.pipe_wr has not been dropped.
             return 0;
         }
-
         let bytes_spliced = splice(
             self.pipe_rd,
             None,
@@ -69,7 +71,7 @@ impl FilePipePair {
             BUF_SIZE,
             SpliceFFlags::empty(),
         ).unwrap_or_else(|err| {
-            eprintln!("Error when attempting to splice to file: {:?}", err);
+            eprintln!("Error when attempting to splice to file: {}", err);
             process::exit(1);
         });
         return bytes_spliced
@@ -91,6 +93,7 @@ fn splice_all(fd_in: RawFd, fd_out: RawFd) {
         });
 
         if bytes_spliced == 0 {
+            // We've spliced everything; return from function.
             break;
         }
     }
@@ -103,7 +106,6 @@ fn instanttee(files: Vec<String>, append: bool) {
     let main_pipe_rd = unsafe { File::from_raw_fd(main_pipe_rd) };
     let main_pipe_wr = unsafe { File::from_raw_fd(main_pipe_wr) };
     let main_pipe_rd = Arc::new(main_pipe_rd);
-    let stdout = stdout();
 
     let mut fpps: Vec<FilePipePair> = Vec::with_capacity(num_files);
     for file in files {
@@ -122,44 +124,50 @@ fn instanttee(files: Vec<String>, append: bool) {
         ));
     }
 
-    let _output_thread = thread::spawn(move || {
+    // Input thread
+    thread::spawn(move || {
         let stdin = stdin();
-        // let _handle = stdin.lock();
+        let _handle = stdin.lock();
         splice_all(stdin.as_raw_fd(), main_pipe_wr.as_raw_fd());
         drop(main_pipe_wr);
     });
 
-    let barrier = Barrier::new(num_files + 1);
-    let count = Arc::new(AtomicUsize::new(0));
+    let barrier = Barrier::new(num_files + 1); // We have one worker for each file,
+                                               // and another for stdout.
     scope(move |scope| {
         for fpp in fpps {
             let mut barrier = barrier.clone();
-            let count = count.clone();
             let main_pipe_rd = main_pipe_rd.clone();
             scope.spawn(move |_| {
                 loop {
                     let res = fpp.write_from_pipe(main_pipe_rd.as_raw_fd());
                     if res == 0 {
+                        // We wrote 0 bytes to fpp, which means that we've done
+                        // our job successfully.
                         process::exit(0);
                     }
-                    count.fetch_add(1, Ordering::SeqCst);
                     barrier.wait();
                 }
             });
         }
         let mut barrier = barrier.clone();
-        let count = count.clone();
         let main_pipe_rd = main_pipe_rd.clone();
         scope.spawn(move |_| {
+            let stdout = stdout();
+            let _handle = stdout.lock();
             loop {
-                if count.load(Ordering::Relaxed) == num_files {
-                    let res = splice(main_pipe_rd.as_raw_fd(), None, stdout.as_raw_fd(), None, BUF_SIZE, SpliceFFlags::empty()).unwrap();
-                    if res == 0 {
-                        process::exit(0);
-                    }
-                    count.store(0, Ordering::Relaxed);
-                    barrier.wait();
-                }
+                barrier.wait();
+                splice(
+                    main_pipe_rd.as_raw_fd(),
+                    None,
+                    stdout.as_raw_fd(),
+                    None,
+                    BUF_SIZE,
+                    SpliceFFlags::empty()
+                ).unwrap_or_else(|err| {
+                    eprintln!("Error when attempting to splice to stdout: {}", err);
+                    process::exit(1);
+                });
             }
         });
     });
