@@ -9,22 +9,14 @@ use std::fs::{File, OpenOptions};
 use std::io::{stdin, stdout};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::process;
-
+use std::thread;
+use std::sync::Arc;
 
 use getopts::Options;
 use nix::fcntl::{splice, tee, SpliceFFlags};
 use nix::unistd::pipe;
-
-
-// Multithreading imports
 use rayon::scope;
 use hurdles::Barrier;
-
-use std::thread;
-// use std::sync::{Arc, Barrier};
-use std::sync::Arc;
-// use std::sync::atomic::{Ordering, AtomicUsize};
-
 
 const BUF_SIZE: usize = 1024 * 64;
 
@@ -47,7 +39,7 @@ impl convert::From<File> for FilePipePair {
     }
 }
 impl FilePipePair {
-    fn write_from_pipe(&self, fd_in: RawFd) -> usize {
+    fn write_from_pipe(&mut self, fd_in: RawFd) -> usize {
         let bytes_teed = tee(
             fd_in,
             self.pipe_wr,
@@ -67,7 +59,7 @@ impl FilePipePair {
             self.pipe_rd,
             None,
             self.file.as_raw_fd(),
-            Some(&mut self.offset.clone()),
+            Some(&mut self.offset),
             BUF_SIZE,
             SpliceFFlags::empty(),
         ).unwrap_or_else(|err| {
@@ -101,7 +93,7 @@ fn splice_all(fd_in: RawFd, fd_out: RawFd) {
 
 fn instanttee(files: Vec<String>, append: bool) {
     let num_files = files.len();
-    // We create two pipes
+    // We create a main pipe
     let (main_pipe_rd, main_pipe_wr) = pipe().unwrap();
     let main_pipe_rd = unsafe { File::from_raw_fd(main_pipe_rd) };
     let main_pipe_wr = unsafe { File::from_raw_fd(main_pipe_wr) };
@@ -135,7 +127,7 @@ fn instanttee(files: Vec<String>, append: bool) {
     let barrier = Barrier::new(num_files + 1); // We have one worker for each file,
                                                // and another for stdout.
     scope(move |scope| {
-        for fpp in fpps {
+        for mut fpp in fpps {
             let mut barrier = barrier.clone();
             let main_pipe_rd = main_pipe_rd.clone();
             scope.spawn(move |_| {
