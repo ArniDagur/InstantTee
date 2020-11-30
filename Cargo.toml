@@ -7,7 +7,7 @@ repository = "https://github.com/ArniDagur/InstantTee"
 license = "MIT"
 
 [dependencies]
-nix = "0.19.0"
+nix = "0.19.1"
 getopts = "0.2"
 
 [[bin]]
